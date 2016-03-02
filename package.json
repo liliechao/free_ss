@@ -1,0 +1,36 @@
+{
+  "name": "free_ss",
+  "description": "free shadowsocks auto config",
+  "version": "0.1.0",
+  "homepage": "https://github.com/gucong3000/free_ss",
+  "author": "gucong (https://github.com/gucong3000)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gucong3000/free_ss.git"
+  },
+  "keywords": [
+    "Sublime Text",
+    "Chinese",
+    "languages",
+    "I18N"
+  ],
+  "licenses": [
+    {
+      "type": "MIT",
+      "url": "https://github.com/jquery/jquery/blob/master/MIT-LICENSE.txt"
+    }
+  ],
+  "dependencies": {
+    "jsdom": "^8.1.0",
+    "request": "^2.69.0"
+  },
+  "devDependencies": {},
+  "bugs": {
+    "url": "https://github.com/gucong3000/Sublime_Text_CN/issues"
+  },
+  "main": "free_ss.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "license": "MIT"
+}
