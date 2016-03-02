@@ -1,13 +1,11 @@
-[Sublime Text](http://www.sublimetext.com/) CN
+free_ss
 ===============
 
-free shadowsocks auto config
-
-免费Shadowsocks自动配置
+> 免费[Shadowsocks](https://github.com/shadowsocks/shadowsocks-windows/tree/master)账号自动配置工具。
 
 ## 安装
 
-1. 安装 [Node.js](https://nodejs.org/) 并 copy `free_ss.js`与`package.json`到`Shadowsocks.exe`所在目录
+1. 安装 [Node.js](https://nodejs.org/) 并 copy `free_ss.js`与`package.json`到`Shadowsocks.exe`所在目录。
 1. 在管理员权限下，命令行运行 `npm i`。
 
 ## 使用
