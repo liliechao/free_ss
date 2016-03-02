@@ -160,12 +160,16 @@ function getInfo(url, selector) {
 						}
 					});
 				});
+
+				// 在配置文件中未找到的全新服务器，追加至配置
 				if (svrs.length) {
 					config.configs = config.configs.concat(svrs);
 					hasChange = true;
 				}
 			}
 			if (done >= count) {
+				// 已抓取所有网页，准备后续工作
+
 				if (hasChange) {
 					require("fs").writeFile(configPath, JSON.stringify(config, null, "\t"), (err) => {
 						if (!err) {
