@@ -201,7 +201,7 @@ function proxyTester() {
 	// https://github.com/gfwlist/gfwlist/blob/master/gfwlist.txt
 
 	var request = require("request");
-	var url = "https://www.google.com/ncr";
+	var url = "http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html";
 	var proxy = "http://127.0.0.1:" + (config.localPort || 1080) + (config.global ? "" : "/pac");
 	log(`${ proxy }\ttry`);
 	// 使用代理尝试访问facebook
@@ -217,7 +217,7 @@ function proxyTester() {
 		.get(url)
 		.on("response", () => {
 			// 成功拿到facebook的响应，一切正常
-			log(`${ url }\tOK`);
+			log(`${ url.replace(/^(\w+\:\/+[^\/]+\/?).*$/, "$1") }\tOK`);
 			// 代理正常，20秒后再试
 			setTimeout(proxyTester, 20000);
 		}).on("error", () => {
