@@ -2,21 +2,21 @@
 
 "use strict";
 
-var jsdom = require("jsdom");
-
 // 可以抓取SS账号的网页，及其CSS选择符
-var srvs = {
+const srvs = {
 	"http://www.ishadowsocks.com/": "#free .col-lg-4.text-center",
 	// "http://sskuai.pw/": ".container .inner p",
 };
-
+const strategy = "com.shadowsocks.strategy.ha";
 var hasChange;
-var configPath = require("path").join(__dirname, "gui-config.json");
+const configPath = require("path").join(__dirname, "gui-config.json");
 var config;
-var count = 0;
-var done = 0;
+var reqCount = 0;
+var reqDone = 0;
 var childProcess;
-var keyMap = {
+
+// 中文所对应的配置项key名
+const keyMap = {
 	"IP": "server",
 	"加密方式": "method",
 	"密码": "password",
@@ -43,9 +43,16 @@ function getInfos() {
 			}
 			if (data) {
 				config = data;
+				upObj(config, {
+					// 配置为自动选择服务器
+					"index": -1,
+					// 若未配置服务器选择算法，则将其配置为“高可用”
+					"strategy": config.strategy || strategy
+				});
 			}
 		}
 		config = config || {
+			"strategy": strategy,
 			"index": -1,
 			"global": false,
 			"configs": [],
@@ -55,7 +62,7 @@ function getInfos() {
 
 		for (var url in srvs) {
 			// 统计服务器数量
-			count++;
+			reqCount++;
 			getInfo(url, srvs[url]);
 		}
 	});
@@ -63,7 +70,7 @@ function getInfos() {
 
 function runShadowsocks() {
 	// 重新启动Shadowsocks
-	var child_process = require("child_process");
+	const child_process = require("child_process");
 	log(`已${ childProcess ? "重启" : "启动" }Shadowsocks`);
 	childProcess = child_process.exec("taskkill /f /im Shadowsocks.exe&&taskkill /f /im ss_privoxy.exe", () => {
 		childProcess = child_process.execFile("Shadowsocks.exe");
@@ -75,26 +82,25 @@ function runShadowsocks() {
 }
 
 
-function changed(objNew, obj2Old) {
+function upObj(objOld, objNew) {
 	for (var key in objNew) {
-		if (objNew[key] !== obj2Old[key]) {
-			return true;
+		if (String(objOld[key]) !== String(objNew[key])) {
+			objOld[key] = objNew[key];
+			hasChange = true;
 		}
 	}
-	return false;
 }
 
 function getInfo(url, selector) {
 
 	// 请求远程数据
-	jsdom.env({
+	require("jsdom").env({
 		url: url,
 		done: (err, window) => {
 			// 统计线程
-			done++;
+			reqDone++;
 			if (!err) {
-				// 在配置中未找到的，添加到配置中
-
+				// 将DOM元素转化为服务器配置信息
 				var svrs = Array.prototype.slice.call(window.document.querySelectorAll(selector), 0).map((node) => {
 					// 提取dom元素中的信息
 					var text = (node.innerText || node.textContent).trim();
@@ -138,6 +144,8 @@ function getInfo(url, selector) {
 						}
 					});
 
+					server.server_port = server.server_port - 0;
+
 					// 根据url与index，为配置项编写remarks
 					if (!server.remarks) {
 						server.remarks = url.replace(/(?:^\w+\:\/+(?:www\.)?|\/.*$)/ig, "") + "/[" + index + "]";
@@ -152,10 +160,7 @@ function getInfo(url, selector) {
 					// 在已有配置中寻找remarks相同的配置项
 					return !config.configs.some((cfgServer) => {
 						if (cfgServer.remarks === server.remarks) {
-							if (changed(server, cfgServer)) {
-								Object.assign(cfgServer, server);
-								hasChange = true;
-							}
+							upObj(cfgServer, server);
 							return true;
 						}
 					});
@@ -167,10 +172,10 @@ function getInfo(url, selector) {
 					hasChange = true;
 				}
 			}
-			if (done >= count) {
-				// 已抓取所有网页，准备后续工作
-
+			if (reqDone >= reqCount) {
+				// 已完成所有网页抓取，准备后续工作
 				if (hasChange) {
+					// 配置信息有变化
 					require("fs").writeFile(configPath, JSON.stringify(config, null, "\t"), (err) => {
 						if (!err) {
 							log(`已更新配置文件\t${ configPath }`);
@@ -197,15 +202,14 @@ function getInfo(url, selector) {
 	});
 }
 
-function proxyTester() {
-	// https://github.com/gfwlist/gfwlist/blob/master/gfwlist.txt
+const url = "http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html";
+const origin = url.replace(/^(\w+\:\/+[^\/]+\/?).*$/, "$1");
 
-	var request = require("request");
-	var url = "http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html";
+function proxyTester(errCont) {
 	var proxy = "http://127.0.0.1:" + (config.localPort || 1080) + (config.global ? "" : "/pac");
-	log(`${ proxy }\ttry`);
-	// 使用代理尝试访问facebook
-	request.defaults({
+	log(`${ origin }\ttry`);
+	// 使用代理尝试访问亚马逊
+	require("request").defaults({
 			proxy: proxy,
 			maxSockets: Infinity,
 			pool: {
@@ -215,16 +219,30 @@ function proxyTester() {
 			time: true
 		})
 		.get(url)
-		.on("response", () => {
-			// 成功拿到facebook的响应，一切正常
-			log(`${ url.replace(/^(\w+\:\/+[^\/]+\/?).*$/, "$1") }\tOK`);
-			// 代理正常，20秒后再试
-			setTimeout(proxyTester, 20000);
-		}).on("error", () => {
-			log(`${ url }\tErr`);
-			// 代理出错，尝试拉取账号
+		.on("response", (response) => {
+			if (response.statusCode >= 200 && response.statusCode < 300 || response.statusCode === 304) {
+				// 成功拿到facebook的响应，一切正常
+				log(`${ origin }\tOK\t${ response.statusCode }`);
+				// 代理正常，20秒后再试
+				setTimeout(proxyTester, 20000);
+			} else {
+				err();
+			}
+		}).on("error", err);
+
+	function err() {
+		// 代理出错，统计出错次数
+		errCont = errCont || 1;
+		log(`${ origin }\tError\t${errCont} time(s).`);
+		if (errCont > 2) {
+			// 代理测试连续三次错误则重新拉取服务器信息
 			getInfos();
-		});
+		} else {
+			// 重测代理并多错误次数计数
+			proxyTester(++errCont);
+		}
+	}
+
 }
 
 function log(msg) {
@@ -236,4 +254,21 @@ function log(msg) {
 	console.log(`[${ time.getFullYear() }/${ time.getMonth()+1 }/${ time.getDate()+1 } ${ fmtd(time.getHours()) }:${ fmtd(time.getMinutes()) }:${ fmtd(time.getSeconds()) }]\t${ msg }`);
 }
 
-getInfos();
+
+const cluster = require("cluster");
+
+function work() {
+	cluster.fork();
+}
+
+if (cluster.isMaster) {
+	// Fork workers.
+	cluster.on("exit", (worker) => {
+		console.log(`进程 ${ worker.process.pid } 遇到未知错误，已重启`);
+		setTimeout(work, 3000);
+	});
+	work();
+} else {
+	// 子进程中工作
+	getInfos();
+}
