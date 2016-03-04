@@ -11,8 +11,6 @@ const strategy = "com.shadowsocks.strategy.ha";
 var hasChange;
 const configPath = require("path").join(__dirname, "gui-config.json");
 var config;
-var reqCount = 0;
-var reqDone = 0;
 var childProcess;
 
 // 中文所对应的配置项key名
@@ -27,45 +25,101 @@ const keyMap = {
 	"端口": "server_port",
 };
 
-function getInfos() {
-	hasChange = false;
-	require("fs").readFile(configPath, (err, data) => {
-		if (!err) {
-			// 本地无配置，自行生成
-			try {
-				data = JSON.parse(data);
-			} catch (ex) {
-				try {
-					data = eval.call(null, "(" + data + ")");
-				} catch (ex) {
-					data = null;
-				}
-			}
-			if (data) {
-				config = data;
-				upObj(config, {
-					// 配置为自动选择服务器
-					"index": -1,
-					// 若未配置服务器选择算法，则将其配置为“高可用”
-					"strategy": config.strategy || strategy
-				});
-			}
-		}
-		config = config || {
-			"strategy": strategy,
-			"index": -1,
-			"global": false,
-			"configs": [],
-			"shareOverLan": true,
-			"localPort": 1080
-		};
+const defaultConfig = {
+	"configs": [],
+	"strategy": strategy,
+	"index": -1,
+	"global": false,
+	"shareOverLan": true,
+	"localPort": 1080
+};
 
-		for (var url in srvs) {
-			// 统计服务器数量
-			reqCount++;
-			getInfo(url, srvs[url]);
+function upObj(objOld, objNew) {
+	for (var key in objNew) {
+		if (String(objOld[key]) !== String(objNew[key])) {
+			objOld[key] = objNew[key];
+			hasChange = true;
+		}
+	}
+	return objOld;
+}
+
+function getConfig() {
+	return new Promise((resolve, reject) => {
+		require("fs").readFile(configPath, (err, data) => {
+			hasChange = false;
+			if (err) {
+				// 配置文件读取错误
+				return reject(err);
+			}
+			try {
+				data = eval.call(null, "(" + data + ")");
+			} catch (ex) {
+				// 配置文件格式错误
+				return reject(ex);
+			}
+			resolve(config = upObj(data, {
+				// 配置为自动选择服务器
+				"index": -1,
+				// 若未配置服务器选择算法，则将其配置为“高可用”
+				"strategy": data.strategy || strategy
+			}));
+		});
+	}).catch(() => {
+		// 配置文件读取错误，使用默认配置
+		return config || defaultConfig;
+	}).then((data) => {
+		// 将配置信息写入全局
+		return config = data;
+	});
+}
+
+function updateConfig(servers) {
+	return getConfig().then((config) => {
+		servers = servers.filter((server) => {
+			// 在已有配置中寻找相同的配置项，将其替换
+			return !config.configs.some((cfgServer) => {
+				if (cfgServer.server === server.server && cfgServer.server_port === server.server_port) {
+					upObj(cfgServer, server);
+					return true;
+				}
+			});
+		});
+
+		// 在配置文件中未找到的全新服务器，追加至配置
+		if (servers.length) {
+			config.configs = config.configs.concat(servers);
+			hasChange = true;
+		}
+
+		if (hasChange) {
+			// 需要更新配置文件
+			require("fs").writeFile(configPath, JSON.stringify(config, null, "  "), (err) => {
+				if (!err) {
+					log(`已更新配置文件\t${ configPath }`);
+				}
+				if (childProcess) {
+					if (!err) {
+						// 更新配置后重启Shadowsocks
+						childProcess.kill();
+					}
+				} else {
+					// 初始化
+					runShadowsocks();
+				}
+			});
+		} else if (childProcess) {
+			// 未更新配置，6秒后重测试代理
+			setTimeout(proxyTest, 6000);
+		} else {
+			// 初始化
+			runShadowsocks();
 		}
 	});
+}
+
+function getInfos() {
+	getServers(srvs).then(updateConfig);
 }
 
 function runShadowsocks() {
@@ -77,181 +131,168 @@ function runShadowsocks() {
 		childProcess.on("close", () => {
 			setTimeout(runShadowsocks, 3000);
 		});
-		setTimeout(proxyTester, 3000);
+		setTimeout(proxyTest, 3000);
 	});
 }
 
-
-function upObj(objOld, objNew) {
-	for (var key in objNew) {
-		if (String(objOld[key]) !== String(objNew[key])) {
-			objOld[key] = objNew[key];
-			hasChange = true;
-		}
-	}
+function getDomFromUrl(url, selector) {
+	return new Promise((resolve, reject) => {
+		// 请求远程数据
+		require("jsdom").env({
+			url: url,
+			done: (err, window) => {
+				// 获取到DOM，查询节点返回给后续处理流程
+				if (err) {
+					reject(err);
+				} else if (selector && (typeof selector === "string")) {
+					resolve(Array.prototype.slice.call(window.document.querySelectorAll(selector), 0));
+				} else {
+					resolve([window.document.documentElement]);
+				}
+			}
+		});
+	}).catch(() => {
+		log(`${ url }\t获取服务器信息失败`);
+		return false;
+	});
 }
 
-function getInfo(url, selector) {
+function getServers(configs) {
+	var reqs = [];
+	for (var url in configs) {
+		reqs.push(getDomFromUrl(url, configs[url]));
+	}
+	return Promise.all(reqs).then((ress) => {
+		// 数组降维
+		ress = Array.prototype.concat.apply([], ress).filter((node) => {
+			// 过滤掉数组中的空元素
+			return node;
+		}).map(node2config);
+		if (ress.length) {
+			log(`共获取到${ ress.length }个服务器`);
+		}
+		return ress;
+	});
+}
 
-	// 请求远程数据
-	require("jsdom").env({
-		url: url,
-		done: (err, window) => {
-			// 统计线程
-			reqDone++;
-			if (!err) {
-				// 将DOM元素转化为服务器配置信息
-				var svrs = Array.prototype.slice.call(window.document.querySelectorAll(selector), 0).map((node) => {
-					// 提取dom元素中的信息
-					var text = (node.innerText || node.textContent).trim();
-					if (/\n/.test(text)) {
-						// 一般的正常情况，按换行符分隔字符串即可
-						return text.split(/\s*\n\s*/g);
-					} else {
+function node2config(node) {
+	// 提取dom元素中的信息
+	var text = (node.innerText || node.textContent).trim();
+	if (/\n/.test(text)) {
+		// 一般的正常情况，按换行符分隔字符串即可
+		node = text.split(/\s*\n\s*/g);
+	} else {
+		// 貌似jsDOM不支持innerText属性，所以采用分析子节点的办法
+		node = Array.prototype.slice.call(node.childNodes, 0).filter((node) => {
+			return node.nodeType === 3;
+		}).map((node) => {
+			return (node.innerText || node.textContent).trim();
+		});
+	}
 
-						// 貌似jsDOM不支持innerText属性，所以采用分析子节点的办法
-						return Array.prototype.slice.call(node.childNodes, 0).filter((node) => {
-							return node.nodeType === 3;
-						}).map((node) => {
-							return (node.innerText || node.textContent).trim();
-						});
-					}
-				}).map((infs, index) => {
-					// 将提取到的信息，转为配置文件所需格式
-					var server = {
-						"server": "",
-						"server_port": 0,
-						"password": "",
-						"method": "aes-256-cfb",
-						"remarks": ""
-					};
+	// 将提取到的信息，转为配置文件所需格式
+	var server = {
+		"server": "",
+		"server_port": 0,
+		"password": "",
+		"method": "aes-256-cfb",
+		"remarks": ""
+	};
 
-					// 遍历每行信息
-					infs.forEach((inf) => {
-						// 按冒号分隔字符串
-						inf = inf.toLowerCase().split(/\s*[\:：]\s*/g);
-						if (keyMap[inf[0]]) {
-							// 根据中文提示，查字典找到配置项key名
-							server[keyMap[inf[0]]] = inf[1];
-						} else {
-							// 字典中找不到的，按字符串查找方式匹配
-							for (var key in keyMap) {
-								if (inf[0].indexOf(key) > -1) {
-									server[keyMap[key]] = inf[1];
-									break;
-								}
-							}
-						}
-					});
-
-					server.server_port = server.server_port - 0;
-
-					// 根据url与index，为配置项编写remarks
-					if (!server.remarks) {
-						server.remarks = url.replace(/(?:^\w+\:\/+(?:www\.)?|\/.*$)/ig, "") + "/[" + index + "]";
-					}
-					return server;
-				});
-				if (svrs.length) {
-					log(`${ url }\t获取到${ svrs.length }个服务器`);
-				}
-
-				svrs = svrs.filter((server) => {
-					// 在已有配置中寻找remarks相同的配置项
-					return !config.configs.some((cfgServer) => {
-						if (cfgServer.remarks === server.remarks) {
-							upObj(cfgServer, server);
-							return true;
-						}
-					});
-				});
-
-				// 在配置文件中未找到的全新服务器，追加至配置
-				if (svrs.length) {
-					config.configs = config.configs.concat(svrs);
-					hasChange = true;
-				}
-			}
-			if (reqDone >= reqCount) {
-				// 已完成所有网页抓取，准备后续工作
-				if (hasChange) {
-					// 配置信息有变化
-					require("fs").writeFile(configPath, JSON.stringify(config, null, "\t"), (err) => {
-						if (!err) {
-							log(`已更新配置文件\t${ configPath }`);
-						}
-						if (childProcess) {
-							if (!err) {
-								// 更新配置后重启Shadowsocks
-								childProcess.kill();
-							}
-						} else {
-							// 初始化
-							runShadowsocks();
-						}
-					});
-				} else if (childProcess) {
-					// 未更新配置，20秒后重测试代理
-					setTimeout(proxyTester, 20000);
-				} else {
-					// 初始化
-					runShadowsocks();
+	// 遍历每行信息
+	node.forEach((inf) => {
+		// 按冒号分隔字符串
+		inf = inf.toLowerCase().split(/\s*[\:：]\s*/g);
+		if (keyMap[inf[0]]) {
+			// 根据中文提示，查字典找到配置项key名
+			server[keyMap[inf[0]]] = inf[1];
+		} else {
+			// 字典中找不到的，按字符串查找方式匹配
+			for (var key in keyMap) {
+				if (inf[0].indexOf(key) > -1) {
+					server[keyMap[key]] = inf[1];
+					break;
 				}
 			}
 		}
+	});
+
+	server.server_port = server.server_port - 0;
+	return server;
+}
+
+function getProxyStatus(url, proxy) {
+	return new Promise((resolve, reject) => {
+		// 使用代理尝试访问亚马逊
+		require("request").defaults({
+				proxy: proxy || ("http://127.0.0.1:" + (config.localPort || 1080) + (config.global ? "" : "/pac"))
+			})
+			.get(url)
+			.on("response", (response) => {
+				var statusCode = response.statusCode;
+				if (statusCode >= 200 && statusCode < 300 || statusCode === 304) {
+					resolve(response);
+				} else {
+					reject(response);
+				}
+			}).on("error", reject);
 	});
 }
 
 const url = "http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html";
-const origin = url.replace(/^(\w+\:\/+[^\/]+\/?).*$/, "$1");
+// const url = "https://www.facebook.com/robots.txt";
+// https://www.youtube.com/robots.txt
 
-function proxyTester(errCont) {
-	var proxy = "http://127.0.0.1:" + (config.localPort || 1080) + (config.global ? "" : "/pac");
-	log(`${ origin }\ttry`);
+function proxyTest(errCont) {
 	// 使用代理尝试访问亚马逊
-	require("request").defaults({
-			proxy: proxy,
-			maxSockets: Infinity,
-			pool: {
-				maxSockets: Infinity
-			},
-			timeout: 20000,
-			time: true
-		})
-		.get(url)
-		.on("response", (response) => {
-			if (response.statusCode >= 200 && response.statusCode < 300 || response.statusCode === 304) {
-				// 成功拿到facebook的响应，一切正常
-				log(`${ origin }\tOK\t${ response.statusCode }`);
-				// 代理正常，20秒后再试
-				setTimeout(proxyTester, 20000);
-			} else {
-				err();
-			}
-		}).on("error", err);
-
-	function err() {
+	getProxyStatus(url).then(() => {
+		// 成功拿到亚马逊的响应，一切正常
+		// 代理正常，6秒后再试
+		setTimeout(proxyTest, 6000);
+		if (errCont) {
+			log(url, true);
+		}
+		return `\tOK\t${ new Date() - timer }ms\n`;
+	}).catch(() => {
 		// 代理出错，统计出错次数
-		errCont = errCont || 1;
-		log(`${ origin }\tError\t${errCont} time(s).`);
+		var msg;
+		if (errCont) {
+			msg = ` ${errCont}`;
+		} else {
+			errCont = 1;
+			msg = "\t代理错误(次): 1";
+		}
 		if (errCont > 2) {
 			// 代理测试连续三次错误则重新拉取服务器信息
 			getInfos();
+			msg += "\n";
 		} else {
 			// 重测代理并多错误次数计数
-			proxyTester(++errCont);
+			proxyTest(++errCont);
 		}
+		return msg;
+	}).then((msg) => {
+		if (msg) {
+			process.stdout.write(msg);
+		}
+	});
+	if (!errCont) {
+		log(url, true);
 	}
-
+	var timer = new Date();
 }
 
-function log(msg) {
-
+function log(msg, noLine) {
 	function fmtd(d) {
 		return `${ d < 10 ? "0" : "" }${ d }`;
 	}
 	var time = new Date();
-	console.log(`[${ time.getFullYear() }/${ time.getMonth()+1 }/${ time.getDate()+1 } ${ fmtd(time.getHours()) }:${ fmtd(time.getMinutes()) }:${ fmtd(time.getSeconds()) }]\t${ msg }`);
+	msg = `[${ fmtd(time.getHours()) }:${ fmtd(time.getMinutes()) }:${ fmtd(time.getSeconds()) }] ${ String(msg).replace(/\b(\w+\:\/+[^\/]+\/?)\S*/, "$1") }`;
+	if (noLine) {
+		process.stdout.write(msg);
+	} else {
+		console.log(msg);
+	}
 }
 
 
@@ -264,7 +305,7 @@ function work() {
 if (cluster.isMaster) {
 	// Fork workers.
 	cluster.on("exit", (worker) => {
-		console.log(`进程 ${ worker.process.pid } 遇到未知错误，已重启`);
+		log(`进程 ${ worker.process.pid } 遇到未知错误，已重启`);
 		setTimeout(work, 3000);
 	});
 	work();
