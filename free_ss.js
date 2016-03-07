@@ -249,67 +249,37 @@ function proxyTest(errCont) {
 		// 成功拿到亚马逊的响应，一切正常
 		// 代理正常，6秒后再试
 		setTimeout(proxyTest, 6000);
-		if (errCont) {
-			log(url, true);
-		}
-		return `\tOK\t${ new Date() - timer }ms\n`;
+		log(`代理测试正常\t耗时: ${ new Date() - timer }ms`);
 	}).catch(() => {
 		// 代理出错，统计出错次数
-		var msg;
-		if (errCont) {
-			msg = ` ${errCont}`;
-		} else {
-			errCont = 1;
-			msg = "\t代理错误(次): 1";
-		}
+		errCont = errCont || 1;
+		log(`代理出现错误${ errCont }次`);
 		if (errCont > 2) {
 			// 代理测试连续三次错误则重新拉取服务器信息
 			getInfos();
-			msg += "\n";
+			log("尝试重新获取账号");
 		} else {
 			// 重测代理并多错误次数计数
 			proxyTest(++errCont);
 		}
-		return msg;
-	}).then((msg) => {
-		if (msg) {
-			process.stdout.write(msg);
-		}
 	});
 	if (!errCont) {
-		log(url, true);
+		log(`尝试使用代理访问\t${ url }`);
 	}
 	var timer = new Date();
 }
 
-function log(msg, noLine) {
+function log(msg) {
 	function fmtd(d) {
 		return `${ d < 10 ? "0" : "" }${ d }`;
 	}
 	var time = new Date();
 	msg = `[${ fmtd(time.getHours()) }:${ fmtd(time.getMinutes()) }:${ fmtd(time.getSeconds()) }] ${ String(msg).replace(/\b(\w+\:\/+[^\/]+\/?)\S*/, "$1") }`;
-	if (noLine) {
-		process.stdout.write(msg);
-	} else {
-		console.log(msg);
-	}
+	console.log(msg);
 }
 
+process.on("uncaughtException", (err) => {
+	console.error(`Caught exception: ${err}`);
+});
 
-const cluster = require("cluster");
-
-function work() {
-	cluster.fork();
-}
-
-if (cluster.isMaster) {
-	// Fork workers.
-	cluster.on("exit", (worker) => {
-		log(`进程 ${ worker.process.pid } 遇到未知错误，已重启`);
-		setTimeout(work, 3000);
-	});
-	work();
-} else {
-	// 子进程中工作
-	getInfos();
-}
+getInfos();
