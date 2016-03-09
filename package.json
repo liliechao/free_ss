@@ -1,6 +1,6 @@
 {
   "name": "free_ss",
-  "description": "free shadowsocks auto config",
+  "description": "free shadowsocks config sync",
   "version": "0.1.0",
   "homepage": "https://github.com/gucong3000/free_ss",
   "author": "gucong (https://github.com/gucong3000)",
@@ -26,7 +26,7 @@
   },
   "devDependencies": {},
   "bugs": {
-    "url": "https://github.com/gucong3000/Sublime_Text_CN/issues"
+    "url": "https://github.com/gucong3000/free_ss/issues"
   },
   "main": "free_ss.js",
   "scripts": {
