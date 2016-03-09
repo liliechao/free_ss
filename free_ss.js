@@ -12,6 +12,7 @@ var hasChange;
 const configPath = require("path").join(__dirname, "gui-config.json");
 var config;
 var childProcess;
+var errCont = 0;
 
 // 中文所对应的配置项key名
 const keyMap = {
@@ -29,8 +30,6 @@ const defaultConfig = {
 	"configs": [],
 	"strategy": strategy,
 	"index": -1,
-	"global": false,
-	"shareOverLan": true,
 	"localPort": 1080
 };
 
@@ -223,9 +222,9 @@ function node2config(node) {
 
 function getProxyStatus(url, proxy) {
 	return new Promise((resolve, reject) => {
-		// 使用代理尝试访问亚马逊
+		// 使用代理尝试访问墙外网站
 		require("request").defaults({
-				proxy: proxy || ("http://127.0.0.1:" + (config.localPort || 1080) + (config.global ? "" : "/pac"))
+				proxy: proxy || ("http://127.0.0.1:" + (config.localPort || 1080))
 			})
 			.get(url)
 			.on("response", (response) => {
@@ -239,33 +238,39 @@ function getProxyStatus(url, proxy) {
 	});
 }
 
-const url = "http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html";
+const urls = ["http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html", "https://www.google.com/", "https://www.youtube.com/", "https://www.facebook.com/"];
 // const url = "https://www.facebook.com/robots.txt";
 // https://www.youtube.com/robots.txt
 
-function proxyTest(errCont) {
-	// 使用代理尝试访问亚马逊
+function proxyTest(index) {
+	// 使用代理尝试访问墙外网站
+	index = index || 0;
+	var url = urls[index];
 	getProxyStatus(url).then(() => {
-		// 成功拿到亚马逊的响应，一切正常
+		// 成功拿到墙外网站的响应，一切正常
 		// 代理正常，6秒后再试
 		setTimeout(proxyTest, 6000);
 		log(`代理测试正常\t耗时: ${ new Date() - timer }ms`);
+		errCont = 0;
 	}).catch(() => {
 		// 代理出错，统计出错次数
-		errCont = errCont || 1;
-		log(`代理出现错误${ errCont }次`);
-		if (errCont > 2) {
+		log("代理测试失败");
+		if (++index >= urls.length) {
 			// 代理测试连续三次错误则重新拉取服务器信息
-			getInfos();
-			log("尝试重新获取账号");
+			if (errCont >= 5 && childProcess) {
+				errCont = 0;
+				childProcess.kill();
+			} else {
+				getInfos();
+				log("尝试重新获取账号");
+				++errCont;
+			}
 		} else {
 			// 重测代理并多错误次数计数
-			proxyTest(++errCont);
+			proxyTest(index);
 		}
 	});
-	if (!errCont) {
-		log(`尝试使用代理访问\t${ url }`);
-	}
+	log(`尝试使用代理访问\t${ url }`);
 	var timer = new Date();
 }
 
