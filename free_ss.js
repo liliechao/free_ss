@@ -144,7 +144,7 @@ function getDomFromUrl(url, selector) {
 				if (err) {
 					reject(err);
 				} else if (selector && (typeof selector === "string")) {
-					resolve(Array.prototype.slice.call(window.document.querySelectorAll(selector), 0));
+					resolve(Array.from(window.document.querySelectorAll(selector)));
 				} else {
 					resolve([window.document.documentElement]);
 				}
@@ -182,7 +182,7 @@ function node2config(node) {
 		node = text.split(/\s*\n\s*/g);
 	} else {
 		// 貌似jsDOM不支持innerText属性，所以采用分析子节点的办法
-		node = Array.prototype.slice.call(node.childNodes, 0).filter((node) => {
+		node = Array.from(node.childNodes).filter((node) => {
 			return node.nodeType === 3;
 		}).map((node) => {
 			return (node.innerText || node.textContent).trim();
