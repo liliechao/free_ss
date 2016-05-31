@@ -135,20 +135,22 @@ function runShadowsocks() {
 			setTimeout(proxyTest, 3000);
 		});
 	} else {
-		if (serverIndex >= config.servers.length) {
+		if (serverIndex >= config.configs.length) {
 			serverIndex = 0;
 		}
-		var server = config.servers[serverIndex];
-		childProcess = child_process.execFile(`sslocal -b 127.0.0.1 -l ${ config.localPort || 1080 } -s ${ server.server || "127.0.0.1" } -p ${ server.server_port || 443 } -k ${ server.password || "''" } -m ${ server.method || "aes-256-cfb" }`, err => {
-			if (err) {
-				setTimeout(runShadowsocks, 1000);
-			} else {
-				childProcess.on("close", () => {
-					setTimeout(runShadowsocks, 3000);
-				});
-				setTimeout(proxyTest, 3000);
-			}
-		});
+		var server = config.configs[serverIndex];
+		if(server){
+			childProcess = child_process.exec(`sslocal -b 0.0.0.0 -l ${ config.localPort || 1080 } -s ${ server.server || "127.0.0.1" } -p ${ server.server_port || 443 } -k ${ server.password || "''" } -m ${ server.method || "aes-256-cfb" } --fast-open`);
+			childProcess.on("close", () => {
+				setTimeout(runShadowsocks, 3000);
+			});
+			childProcess.on("data", data => {
+				console.log(data);
+			});
+			setTimeout(proxyTest, 3000);
+		} else {
+			getInfos();
+		}
 		serverIndex++;
 	}
 }
@@ -242,24 +244,29 @@ function node2config(node) {
 function getProxyStatus(url, proxy) {
 	return new Promise((resolve, reject) => {
 		// 使用代理尝试访问墙外网站
-		require("request").defaults({
-				proxy: proxy || ("http://127.0.0.1:" + (config.localPort || 1080))
-			})
-			.get(url)
-			.on("response", (response) => {
-				var statusCode = response.statusCode;
-				if (statusCode >= 200 && statusCode < 300 || statusCode === 304) {
-					resolve(response);
-				} else {
-					reject(response);
-				}
-			}).on("error", reject);
+		var Agent = require("socks5-http-client/lib/Agent");
+		require("request").get({
+			url: url,
+			agentClass: Agent,
+		})
+
+		.on("response", (response) => {
+			var statusCode = response.statusCode;
+			if (statusCode >= 200) {
+				resolve(response);
+			} else {
+				reject(response);
+			}
+		}).on("error", reject);
 	});
 }
 
-const urls = ["http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html", "https://www.google.com/", "https://www.youtube.com/", "https://www.facebook.com/"];
-// const url = "https://www.facebook.com/robots.txt";
-// https://www.youtube.com/robots.txt
+const urls = [
+	"http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html",
+	"http://www.google.com/",
+	"http://www.youtube.com/",
+	"http://www.facebook.com/"
+];
 
 function proxyTest(index) {
 	// 使用代理尝试访问墙外网站
