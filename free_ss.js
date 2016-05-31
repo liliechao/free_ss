@@ -13,6 +13,7 @@ const configPath = require("path").join(__dirname, "gui-config.json");
 var config;
 var childProcess;
 var errCont = 0;
+var serverIndex = 0;
 
 // 中文所对应的配置项key名
 const keyMap = {
@@ -125,13 +126,31 @@ function runShadowsocks() {
 	// 重新启动Shadowsocks
 	const child_process = require("child_process");
 	log(`已${ childProcess ? "重启" : "启动" }Shadowsocks`);
-	childProcess = child_process.exec("taskkill /f /im Shadowsocks.exe&&taskkill /f /im ss_privoxy.exe", () => {
-		childProcess = child_process.execFile("Shadowsocks.exe");
-		childProcess.on("close", () => {
-			setTimeout(runShadowsocks, 3000);
+	if (process.platform === "win32") {
+		childProcess = child_process.exec("taskkill /f /im Shadowsocks.exe&&taskkill /f /im ss_privoxy.exe", () => {
+			childProcess = child_process.execFile("Shadowsocks.exe");
+			childProcess.on("close", () => {
+				setTimeout(runShadowsocks, 3000);
+			});
+			setTimeout(proxyTest, 3000);
 		});
-		setTimeout(proxyTest, 3000);
-	});
+	} else {
+		if (serverIndex >= config.servers.length) {
+			serverIndex = 0;
+		}
+		var server = config.servers[serverIndex];
+		childProcess = child_process.execFile(`sslocal -b 127.0.0.1 -l ${ config.localPort || 1080 } -s ${ server.server || "127.0.0.1" } -p ${ server.server_port || 443 } -k ${ server.password || "''" } -m ${ server.method || "aes-256-cfb" }`, err => {
+			if (err) {
+				setTimeout(runShadowsocks, 1000);
+			} else {
+				childProcess.on("close", () => {
+					setTimeout(runShadowsocks, 3000);
+				});
+				setTimeout(proxyTest, 3000);
+			}
+		});
+		serverIndex++;
+	}
 }
 
 function getDomFromUrl(url, selector) {
