@@ -13,7 +13,6 @@ const configPath = require("path").join(__dirname, "gui-config.json");
 var config;
 var childProcess;
 var errCont = 0;
-var serverIndex = 0;
 
 // 中文所对应的配置项key名
 const keyMap = {
@@ -96,6 +95,15 @@ function updateConfig(servers) {
 
 		if (hasChange) {
 			// 需要更新配置文件
+			if (process.platform !== "win32") {
+				var contents = ["listen = http://0.0.0.0:1080", "loadBalance = latency"].concat(config.configs.map(server => {
+					return `proxy = ss://${ server.method || "aes-256-cfb" }:${ server.password || "" }@${ server.server }:${ server.server_port || 443 }`;
+				}));
+				contents = contents.join("\n") + "\n";
+				require("fs").writeFile(require("path").join(require("os").homedir(), ".cow/rc"), contents, err => {
+					console.error(err);
+	                        });
+			}
 			require("fs").writeFile(configPath, JSON.stringify(config, null, "  "), err => {
 				if (!err) {
 					log(`已更新配置文件\t${ configPath }`);
@@ -137,23 +145,18 @@ function runShadowsocks() {
 			setTimeout(proxyTest, 3000);
 		});
 	} else {
-		if (serverIndex >= config.configs.length) {
-			serverIndex = 0;
-		}
-		var server = config.configs[serverIndex];
-		if (server) {
-			childProcess = child_process.exec(`sslocal -b 0.0.0.0 -l ${ config.localPort || 1080 } -s ${ server.server || "127.0.0.1" } -p ${ server.server_port || 443 } -k ${ server.password || "''" } -m ${ server.method || "aes-256-cfb" } --fast-open`);
-			childProcess.on("close", () => {
-				setTimeout(runShadowsocks, 3000);
-			});
-			childProcess.on("data", data => {
-				console.log(data);
-			});
-			setTimeout(proxyTest, 3000);
-		} else {
-			getInfos();
-		}
-		serverIndex++;
+		childProcess = child_process.exec(require("path").join(__dirname, "cow"), err => {
+			if(err) {
+				console.error(err);
+			}
+		});
+		childProcess.on("close", () => {
+			setTimeout(runShadowsocks, 3000);
+		});
+		childProcess.stdout.on("data", data => {
+			console.log(data);
+		});
+		setTimeout(proxyTest, 3000);
 	}
 }
 
@@ -256,30 +259,13 @@ function node2config(node) {
 // 使用代理尝试访问墙外网站
 function getProxyStatus(url) {
 	return new Promise((resolve, reject) => {
-		var Agent;
-		// 尝试加载socks5组件
-		try {
-			Agent = require("socks5-http-client/lib/Agent");
-		} catch (ex) {
-
-		}
 		// 配置URL
 		var opt = {
 			url: url,
 			timeout: 8000,
-		};
-		var port = config.localPort || 1080;
-		if (Agent) {
-			// 配置socks5代理
-			opt.agentClass = Agent;
-			opt.agentOptions = {
-				socksHost: "127.0.0.1",
-				socksPort: port
-			};
-		} else {
 			// 配置HTTP代理
-			opt.proxy = "http://127.0.0.1:" + port;
-		}
+			proxy: "http://127.0.0.1:" + (config.localPort || 1080),
+		};
 
 		var r = require("request").get(opt)
 
@@ -350,3 +336,4 @@ process.on("uncaughtException", err => {
 });
 
 getInfos();
+log("启动成功，正在寻找免费帐号");
