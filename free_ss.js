@@ -5,7 +5,7 @@
 // 可以抓取SS账号的网页，及其CSS选择符
 const srvs = {
 	"http://www.ishadowsocks.com/": "#free .col-lg-4.text-center",
-	// "http://sskuai.pw/": ".container .inner p",
+	"http://feng.com:8080/forum.php?mod=viewthread&tid=10340585&mobile=1": ".postmessage",
 };
 const strategy = "com.shadowsocks.strategy.ha";
 var hasChange;
@@ -24,6 +24,7 @@ const keyMap = {
 	"服务地址": "server",
 	"服务密码": "password",
 	"服务端口": "server_port",
+	"端口号": "server_port",
 	"端口": "server_port",
 };
 
@@ -68,17 +69,17 @@ function getConfig() {
 	}).catch(() => {
 		// 配置文件读取错误，使用默认配置
 		return config || defaultConfig;
-	}).then((data) => {
+	}).then(data => {
 		// 将配置信息写入全局
 		return config = data;
 	});
 }
 
 function updateConfig(servers) {
-	return getConfig().then((config) => {
-		servers = servers.filter((server) => {
+	return getConfig().then(config => {
+		servers = servers.filter(server => {
 			// 在已有配置中寻找相同的配置项，将其替换
-			return !config.configs.some((cfgServer) => {
+			return !config.configs.some(cfgServer => {
 				if (cfgServer.server === server.server && cfgServer.server_port === server.server_port) {
 					upObj(cfgServer, server);
 					return true;
@@ -94,7 +95,7 @@ function updateConfig(servers) {
 
 		if (hasChange) {
 			// 需要更新配置文件
-			require("fs").writeFile(configPath, JSON.stringify(config, null, "  "), (err) => {
+			require("fs").writeFile(configPath, JSON.stringify(config, null, "  "), err => {
 				if (!err) {
 					log(`已更新配置文件\t${ configPath }`);
 				}
@@ -139,7 +140,7 @@ function runShadowsocks() {
 			serverIndex = 0;
 		}
 		var server = config.configs[serverIndex];
-		if(server){
+		if (server) {
 			childProcess = child_process.exec(`sslocal -b 0.0.0.0 -l ${ config.localPort || 1080 } -s ${ server.server || "127.0.0.1" } -p ${ server.server_port || 443 } -k ${ server.password || "''" } -m ${ server.method || "aes-256-cfb" } --fast-open`);
 			childProcess.on("close", () => {
 				setTimeout(runShadowsocks, 3000);
@@ -182,12 +183,15 @@ function getServers(configs) {
 	for (var url in configs) {
 		reqs.push(getDomFromUrl(url, configs[url]));
 	}
-	return Promise.all(reqs).then((ress) => {
+	return Promise.all(reqs).then(ress => {
 		// 数组降维
-		ress = Array.prototype.concat.apply([], ress).filter((node) => {
+		ress = Array.prototype.concat.apply([], ress).filter(node => {
 			// 过滤掉数组中的空元素
 			return node;
-		}).map(node2config);
+		}).map(node2config).filter(node => {
+			// 过滤掉数组中的空元素
+			return node.server;
+		});
 		if (ress.length) {
 			log(`共获取到${ ress.length }个服务器`);
 		}
@@ -203,9 +207,9 @@ function node2config(node) {
 		node = text.split(/\s*\n\s*/g);
 	} else {
 		// 貌似jsDOM不支持innerText属性，所以采用分析子节点的办法
-		node = Array.from(node.childNodes).filter((node) => {
+		node = Array.from(node.childNodes).filter(node => {
 			return node.nodeType === 3;
-		}).map((node) => {
+		}).map(node => {
 			return (node.innerText || node.textContent).trim();
 		});
 	}
@@ -213,26 +217,31 @@ function node2config(node) {
 	// 将提取到的信息，转为配置文件所需格式
 	var server = {
 		"server": "",
-		"server_port": 0,
+		"server_port": 443,
 		"password": "",
 		"method": "aes-256-cfb",
 		"remarks": ""
 	};
 
 	// 遍历每行信息
-	node.forEach((inf) => {
+	node.forEach(inf => {
 		// 按冒号分隔字符串
-		inf = inf.toLowerCase().split(/\s*[\:：]\s*/g);
-		if (keyMap[inf[0]]) {
+		inf = inf.split(/\s*[\:：]\s*/g);
+		var key = inf[0];
+		var val = inf[1];
+		if (key && inf.length > 1) {
 			// 根据中文提示，查字典找到配置项key名
-			server[keyMap[inf[0]]] = inf[1];
-		} else {
-			// 字典中找不到的，按字符串查找方式匹配
-			for (var key in keyMap) {
-				if (inf[0].indexOf(key) > -1) {
-					server[keyMap[key]] = inf[1];
-					break;
+			key = keyMap[key] || (function() {
+				// 字典中找不到的，按字符串查找方式匹配
+				for (var keyName in keyMap) {
+					if (key.indexOf(keyName) > -1) {
+						return keyMap[keyName];
+					}
 				}
+			})();
+			// 写入数据
+			if (key && !server[key]) {
+				server[key] = key === "password" ? val : val.toLowerCase();
 			}
 		}
 	});
@@ -241,23 +250,46 @@ function node2config(node) {
 	return server;
 }
 
-function getProxyStatus(url, proxy) {
+// 使用代理尝试访问墙外网站
+function getProxyStatus(url) {
 	return new Promise((resolve, reject) => {
-		// 使用代理尝试访问墙外网站
-		var Agent = require("socks5-http-client/lib/Agent");
-		require("request").get({
-			url: url,
-			agentClass: Agent,
-		})
+		var Agent;
+		// 尝试加载socks5组件
+		try {
+			Agent = require("socks5-http-client/lib/Agent");
+		} catch (ex) {
 
-		.on("response", (response) => {
-			var statusCode = response.statusCode;
-			if (statusCode >= 200) {
+		}
+		// 配置URL
+		var opt = {
+			url: url,
+			timeout: 8000,
+		};
+		var port = config.localPort || 1080;
+		if (Agent) {
+			// 配置socks5代理
+			opt.agentClass = Agent;
+			opt.agentOptions = {
+				socksHost: "127.0.0.1",
+				socksPort: port
+			};
+		} else {
+			// 配置HTTP代理
+			opt.proxy = "http://127.0.0.1:" + port;
+		}
+
+		var r = require("request").get(opt)
+
+		.on("response", response => {
+			r.abort();
+			if (response.statusCode >= 200) {
 				resolve(response);
 			} else {
 				reject(response);
 			}
-		}).on("error", reject);
+		})
+
+		.on("error", reject);
 	});
 }
 
@@ -274,19 +306,20 @@ function proxyTest(index) {
 	var url = urls[index];
 	getProxyStatus(url).then(() => {
 		// 成功拿到墙外网站的响应，一切正常
-		// 代理正常，6秒后再试
-		setTimeout(proxyTest, 6000);
+		// 代理正常，40秒后再试
+		setTimeout(proxyTest, 40000);
 		log(`代理测试正常\t耗时: ${ new Date() - timer }ms`);
 		errCont = 0;
 	}).catch(() => {
 		// 代理出错，统计出错次数
 		log("代理测试失败");
 		if (++index >= urls.length) {
-			// 代理测试连续三次错误则重新拉取服务器信息
-			if (errCont >= 5 && childProcess) {
+			// 代理测试连续6次错误则重启Shadowsocks进程
+			if (errCont >= 6 && childProcess) {
 				errCont = 0;
 				childProcess.kill();
 			} else {
+				// 重新拉取服务器信息
 				getInfos();
 				log("尝试重新获取账号");
 				++errCont;
@@ -309,7 +342,7 @@ function log(msg) {
 	console.log(msg);
 }
 
-process.on("uncaughtException", (err) => {
+process.on("uncaughtException", err => {
 	console.error(`Caught exception: ${err}`);
 });
 
