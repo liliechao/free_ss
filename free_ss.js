@@ -5,7 +5,7 @@
 // 可以抓取SS账号的网页，及其CSS选择符
 const srvs = {
 	"http://www.ishadowsocks.com/": "#free .col-lg-4.text-center",
-	"http://feng.com:8080/forum.php?mod=viewthread&tid=10340585&mobile=1": ".postmessage",
+	"http://freeshadowsocks.cf/": ".text-center",
 };
 const strategy = "com.shadowsocks.strategy.ha";
 var hasChange;
@@ -26,6 +26,7 @@ const keyMap = {
 	"服务端口": "server_port",
 	"端口号": "server_port",
 	"端口": "server_port",
+	"状态": "remarks",
 };
 
 const defaultConfig = {
@@ -217,16 +218,16 @@ function node2config(node) {
 	// 将提取到的信息，转为配置文件所需格式
 	var server = {
 		"server": "",
-		"server_port": 443,
+		"server_port": 0,
 		"password": "",
-		"method": "aes-256-cfb",
+		"method": "",
 		"remarks": ""
 	};
 
 	// 遍历每行信息
 	node.forEach(inf => {
 		// 按冒号分隔字符串
-		inf = inf.split(/\s*[\:：]\s*/g);
+		inf = inf.split(/\s*[:：]\s*/g);
 		var key = inf[0];
 		var val = inf[1];
 		if (key && inf.length > 1) {
@@ -246,7 +247,9 @@ function node2config(node) {
 		}
 	});
 
-	server.server_port = server.server_port - 0;
+	server.server_port = +server.server_port || 443;
+	server.method = server.method || "aes-256-cfb";
+
 	return server;
 }
 
