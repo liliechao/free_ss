@@ -4,15 +4,14 @@
 
 // 可以抓取SS账号的网页，及其CSS选择符
 const srvs = {
-	"http://www.ishadowsocks.com/": "#free .col-lg-4.text-center",
 	"http://freeshadowsocks.cf/": ".text-center",
+	"http://www.ishadowsocks.net/": "#free .col-lg-4.text-center",
 };
 const strategy = "com.shadowsocks.strategy.ha";
 var hasChange;
 const configPath = require("path").join(__dirname, "gui-config.json");
 var config;
 var childProcess;
-var errCont = 0;
 
 // 中文所对应的配置项key名
 const keyMap = {
@@ -68,96 +67,82 @@ function getConfig() {
 		});
 	}).catch(() => {
 		// 配置文件读取错误，使用默认配置
-		return config || defaultConfig;
-	}).then(data => {
-		// 将配置信息写入全局
-		return config = data;
+		return config || (config = defaultConfig);
 	});
+}
+
+function getNewConfig() {
+	return getServers(srvs)
+
+	.then(servers => updateConfig(servers));
 }
 
 function updateConfig(servers) {
 	return getConfig().then(config => {
-		servers = servers.filter(server => {
-			// 在已有配置中寻找相同的配置项，将其替换
-			return !config.configs.some(cfgServer => {
-				if (cfgServer.server === server.server && cfgServer.server_port === server.server_port) {
-					upObj(cfgServer, server);
-					return true;
-				}
+		var newServers = [];
+		if(config.configs){
+			servers = servers.filter(server => {
+				// 在已有配置中寻找相同的配置项，将其替换
+				return !config.configs.some(cfgServer => {
+					if (cfgServer.server === server.server && cfgServer.server_port === server.server_port) {
+						upObj(cfgServer, server);
+						newServers.push(cfgServer);
+						return true;
+					}
+				});
 			});
-		});
-
+		}
 		// 在配置文件中未找到的全新服务器，追加至配置
 		if (servers.length) {
-			config.configs = config.configs.concat(servers);
+			newServers = newServers.concat(servers);
 			hasChange = true;
 		}
 
 		if (hasChange) {
 			// 需要更新配置文件
+			var result = [];
+			var fs = require("fs-extra-async");
 			if (process.platform !== "win32") {
-				var contents = ["listen = http://0.0.0.0:1080", "loadBalance = latency"].concat(config.configs.map(server => {
+				result.push(fs.outputFileAsync(require("path").join(require("os").homedir(), ".cow/rc"), ["listen = http://0.0.0.0:1080", "loadBalance = latency"].concat(newServers.map(server => {
 					return `proxy = ss://${ server.method || "aes-256-cfb" }:${ server.password || "" }@${ server.server }:${ server.server_port || 443 }`;
-				}));
-				contents = contents.join("\n") + "\n";
-				require("fs").writeFile(require("path").join(require("os").homedir(), ".cow/rc"), contents, err => {
-					console.error(err);
-	                        });
+				})).join("\n") + "\n"));
 			}
-			require("fs").writeFile(configPath, JSON.stringify(config, null, "  "), err => {
-				if (!err) {
-					log(`已更新配置文件\t${ configPath }`);
-				}
-				if (childProcess) {
-					if (!err) {
-						// 更新配置后重启Shadowsocks
-						childProcess.kill();
-					}
-				} else {
-					// 初始化
-					runShadowsocks();
-				}
-			});
-		} else if (childProcess) {
-			// 未更新配置，6秒后重测试代理
-			setTimeout(proxyTest, 6000);
-		} else {
-			// 初始化
-			runShadowsocks();
-		}
-	});
-}
 
-function getInfos() {
-	getServers(srvs).then(updateConfig);
+			config.configs = newServers;
+			result.push(fs.outputFileAsync(configPath, JSON.stringify(config, null, "  ")));
+			return Promise.all(result);
+		}
+		return false;
+	});
 }
 
 function runShadowsocks() {
 	// 重新启动Shadowsocks
 	const child_process = require("child_process");
-	log(`已${ childProcess ? "重启" : "启动" }Shadowsocks`);
-	if (process.platform === "win32") {
-		childProcess = child_process.exec("taskkill /f /im Shadowsocks.exe&&taskkill /f /im ss_privoxy.exe", () => {
-			childProcess = child_process.execFile("Shadowsocks.exe");
-			childProcess.on("close", () => {
-				setTimeout(runShadowsocks, 3000);
-			});
-			setTimeout(proxyTest, 3000);
-		});
-	} else {
-		childProcess = child_process.exec(require("path").join(__dirname, "cow"), err => {
-			if(err) {
-				console.error(err);
-			}
-		});
-		childProcess.on("close", () => {
-			setTimeout(runShadowsocks, 3000);
-		});
-		childProcess.stdout.on("data", data => {
-			console.log(data);
-		});
-		setTimeout(proxyTest, 3000);
+	log(`已${ childProcess ? "启动" : "重启" }Shadowsocks`);
+	childProcess = null;
+
+	try {
+		child_process.execSync(process.platform === "win32" ? "taskkill /f /im Shadowsocks.exe&&taskkill /f /im ss_privoxy.exe" : "killall cow");
+	} catch (ex) {
+
 	}
+
+	childProcess = child_process.exec(require("path").join(__dirname, process.platform === "win32" ? "Shadowsocks.exe" : "cow"));
+
+	childProcess.on("close", () => {
+		if (childProcess) {
+			setTimeout(runShadowsocks, 3000);
+		}
+	});
+	childProcess.stdout.on("data", data => {
+		console.log(data);
+	});
+	childProcess.stderr.on("data", data => {
+		console.error(data);
+	});
+
+	return childProcess;
 }
 
 function getDomFromUrl(url, selector) {
@@ -187,19 +172,24 @@ function getServers(configs) {
 	for (var url in configs) {
 		reqs.push(getDomFromUrl(url, configs[url]));
 	}
-	return Promise.all(reqs).then(ress => {
+	return Promise.all(reqs)
+
+	.then(ress => {
 		// 数组降维
 		ress = Array.prototype.concat.apply([], ress).filter(node => {
 			// 过滤掉数组中的空元素
 			return node;
 		}).map(node2config).filter(node => {
-			// 过滤掉数组中的空元素
+			// 过滤掉数组中的无效数据
 			return node.server;
 		});
 		if (ress.length) {
 			log(`共获取到${ ress.length }个服务器`);
+			return ress;
+		} else {
+			log(`获取服务器失败，正在重试`);
+			return getServers(configs);
 		}
-		return ress;
 	});
 }
 
@@ -262,7 +252,7 @@ function getProxyStatus(url) {
 		// 配置URL
 		var opt = {
 			url: url,
-			timeout: 8000,
+			timeout: 5000,
 			// 配置HTTP代理
 			proxy: "http://127.0.0.1:" + (config.localPort || 1080),
 		};
@@ -283,43 +273,53 @@ function getProxyStatus(url) {
 }
 
 const urls = [
-	"http://s3.amazonaws.com/psiphon/landing-page-redirect/redirect.html",
-	"http://www.google.com/",
-	"http://www.youtube.com/",
-	"http://www.facebook.com/"
+	"https://www.youtube.com/",
+	"https://www.facebook.com/",
+	"https://twitter.com/",
+	"https://www.google.com/",
 ];
 
 function proxyTest(index) {
 	// 使用代理尝试访问墙外网站
 	index = index || 0;
 	var url = urls[index];
-	getProxyStatus(url).then(() => {
+	var timer = new Date();
+	log(`尝试使用代理访问\t${ url }`);
+	return getProxyStatus(url).then(() => {
 		// 成功拿到墙外网站的响应，一切正常
-		// 代理正常，40秒后再试
-		setTimeout(proxyTest, 40000);
+		// 代理正常，3秒后再试
 		log(`代理测试正常\t耗时: ${ new Date() - timer }ms`);
-		errCont = 0;
 	}).catch(() => {
 		// 代理出错，统计出错次数
 		log("代理测试失败");
 		if (++index >= urls.length) {
-			// 代理测试连续6次错误则重启Shadowsocks进程
-			if (errCont >= 6 && childProcess) {
-				errCont = 0;
-				childProcess.kill();
-			} else {
-				// 重新拉取服务器信息
-				getInfos();
-				log("尝试重新获取账号");
-				++errCont;
-			}
+			throw new Error("无法翻墙");
 		} else {
 			// 重测代理并多错误次数计数
-			proxyTest(index);
+			return proxyTest(index);
 		}
 	});
-	log(`尝试使用代理访问\t${ url }`);
-	var timer = new Date();
+}
+
+function startHeartBeat() {
+	setTimeout(heartBeat, 3000);
+}
+
+function heartBeat() {
+	proxyTest().
+
+	then(startHeartBeat)
+
+	.catch(() => {
+		getNewConfig()
+
+		.then(() => {
+			childProcess.kill();
+			startHeartBeat();
+		})
+
+		.catch(startHeartBeat);
+	});
 }
 
 function log(msg) {
@@ -335,5 +335,11 @@ process.on("uncaughtException", err => {
 	console.error(`Caught exception: ${err}`);
 });
 
-getInfos();
 log("启动成功，正在寻找免费帐号");
+
+getNewConfig()
+
+.then(() => {
+	runShadowsocks();
+	startHeartBeat();
+});
