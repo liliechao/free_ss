@@ -210,7 +210,7 @@ function getServers(configs) {
 			return node;
 		}).map(node2config).filter(node => {
 			// 过滤掉数组中的无效数据
-			return node.server;
+			return node.server && node.password;
 		});
 		if (ress.length) {
 			log(`共获取到${ ress.length }个服务器`);
