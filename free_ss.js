@@ -80,7 +80,7 @@ function getNewConfig() {
 function updateConfig(servers) {
 	return getConfig().then(config => {
 		var newServers = [];
-		if(config.configs){
+		if (config.configs) {
 			servers = servers.filter(server => {
 				// 在已有配置中寻找相同的配置项，将其替换
 				return !config.configs.some(cfgServer => {
@@ -117,32 +117,61 @@ function updateConfig(servers) {
 }
 
 function runShadowsocks() {
-	// 重新启动Shadowsocks
-	const child_process = require("child_process");
-	log(`已${ childProcess ? "启动" : "重启" }Shadowsocks`);
-	childProcess = null;
+	return new Promise((resolve, reject) => {
+		var resolved;
 
-	try {
-		child_process.execSync(process.platform === "win32" ? "taskkill /f /im Shadowsocks.exe&&taskkill /f /im ss_privoxy.exe" : "killall cow");
-	} catch (ex) {
+		// 重新启动Shadowsocks
+		const child_process = require("child_process");
+		childProcess = null;
 
-	}
-
-	childProcess = child_process.exec(require("path").join(__dirname, process.platform === "win32" ? "Shadowsocks.exe" : "cow"));
-
-	childProcess.on("close", () => {
-		if (childProcess) {
-			setTimeout(runShadowsocks, 3000);
+		try {
+			// 终止现有的Shadowsocks进程
+			child_process.execSync(process.platform === "win32" ? "taskkill /f /im Shadowsocks.exe&&taskkill /f /im ss_privoxy.exe" : "killall cow");
+			setTimeout(startProcess, 3000);
+		} catch (ex) {
+			startProcess();
 		}
-	});
-	childProcess.stdout.on("data", data => {
-		console.log(data);
-	});
-	childProcess.stderr.on("data", data => {
-		console.error(data);
-	});
 
-	return childProcess;
+		function startProcess() {
+			function callback() {
+				if (!resolved) {
+					resolved = true;
+					log("已启动Shadowsocks");
+					resolve(childProcess);
+				}
+			}
+
+			// 新开Shadowsocks进程
+			childProcess = child_process.exec(require("path").join(__dirname, process.platform === "win32" ? "Shadowsocks.exe" : "cow"), error => reject(error));
+
+			// 进程意外退出则自动重启进程
+			childProcess.on("close", () => {
+				if (childProcess) {
+					childProcess = null;
+					log("Shadowsocks进程意外崩溃");
+					setTimeout(runShadowsocks, 3000);
+				}
+			});
+
+			// 输出子进程控制台信息
+			childProcess.stdout.on("data", data => {
+				console.log(data);
+				callback();
+			});
+
+			// 输出子进程控制台错误
+			childProcess.stderr.on("data", data => {
+				console.error(data);
+			});
+
+			process.nextTick(callback);
+		}
+	})
+
+	.catch(error => {
+		console.error(error);
+		process.exit(1);
+	});
 }
 
 function getDomFromUrl(url, selector) {
@@ -240,6 +269,7 @@ function node2config(node) {
 		}
 	});
 
+	// 服务器端口号转换为整数
 	server.server_port = +server.server_port || 443;
 	server.method = server.method || "aes-256-cfb";
 
@@ -284,7 +314,7 @@ function proxyTest(index) {
 	index = index || 0;
 	var url = urls[index];
 	var timer = new Date();
-	log(`尝试使用代理访问\t${ url }`);
+	log(`尝试使用代理访问\t${ url }\t`);
 	return getProxyStatus(url).then(() => {
 		// 成功拿到墙外网站的响应，一切正常
 		// 代理正常，3秒后再试
@@ -301,25 +331,57 @@ function proxyTest(index) {
 	});
 }
 
+// 测试自动代理工具是否正常
+function getPac() {
+	return new Promise((resolve, reject) => {
+		// 配置URL
+		var opt = {
+			url: "http://127.0.0.1:" + (config.localPort || 1080) + "/pac",
+			timeout: 600,
+		};
+
+		var r = require("request").get(opt)
+
+		.on("response", response => {
+			r.abort();
+			if (response.statusCode >= 200) {
+				resolve(response);
+			} else {
+				reject(response);
+			}
+		})
+
+		.on("error", reject);
+	})
+
+	.catch(error => {
+		log("pac文件访问失败");
+		throw error;
+	});
+}
+
 function startHeartBeat() {
 	setTimeout(heartBeat, 3000);
 }
 
 function heartBeat() {
-	proxyTest().
 
-	then(startHeartBeat)
+	getPac()
+
+	.catch(runShadowsocks)
+
+	.then(() => proxyTest())
 
 	.catch(() => {
-		getNewConfig()
+		return getNewConfig()
 
-		.then(() => {
-			childProcess.kill();
-			startHeartBeat();
-		})
+		.then(hasChange => {
+			return hasChange ? runShadowsocks() : null;
+		});
+	})
 
-		.catch(startHeartBeat);
-	});
+	.then(startHeartBeat);
+
 }
 
 function log(msg) {
@@ -339,7 +401,6 @@ log("启动成功，正在寻找免费帐号");
 
 getNewConfig()
 
-.then(() => {
-	runShadowsocks();
-	startHeartBeat();
-});
+.then(runShadowsocks)
+
+.then(startHeartBeat);
