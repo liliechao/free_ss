@@ -74,7 +74,7 @@ function getConfig() {
 function getNewConfig() {
 	return getServers(srvs)
 
-	.then(servers => updateConfig(servers));
+	.then(updateConfig);
 }
 
 function updateConfig(servers) {
@@ -113,7 +113,7 @@ function updateConfig(servers) {
 			return Promise.all(result);
 		}
 		return false;
-	});
+	}).catch(exit);
 }
 
 function runShadowsocks() {
@@ -166,11 +166,6 @@ function runShadowsocks() {
 
 			process.nextTick(callback);
 		}
-	})
-
-	.catch(error => {
-		console.error(error);
-		process.exit(1);
 	});
 }
 
@@ -403,4 +398,11 @@ getNewConfig()
 
 .then(runShadowsocks)
 
+.catch(exit)
+
 .then(startHeartBeat);
+
+function exit(error) {
+	console.error(error);
+	process.exit(error ? 1 : 0);
+}
