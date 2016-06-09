@@ -158,13 +158,13 @@ function runShadowsocks() {
 
 			// 输出子进程控制台信息
 			childProcess.stdout.on("data", data => {
-				console.log(data);
+				console.log(data.toString());
 				callback();
 			});
 
 			// 输出子进程控制台错误
 			childProcess.stderr.on("data", data => {
-				console.error(data);
+				console.error(data.toString());
 			});
 
 			process.nextTick(callback);
