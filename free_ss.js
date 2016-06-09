@@ -29,9 +29,10 @@ const keyMap = {
 
 const defaultConfig = {
 	"configs": [],
-	"strategy": strategy,
 	"index": -1,
-	"localPort": 1080
+	"localPort": 1080,
+	"shareOverLan": true,
+	"strategy": strategy,
 };
 
 function upObj(objOld, objNew) {
@@ -61,8 +62,10 @@ function getConfig() {
 			resolve(config = upObj(data, {
 				// 配置为自动选择服务器
 				"index": -1,
+				// 允许局域网内的计算机连接
+				"shareOverLan": true,
 				// 若未配置服务器选择算法，则将其配置为“高可用”
-				"strategy": data.strategy || strategy
+				"strategy": data.strategy || strategy,
 			}));
 		});
 	}).catch(() => {
@@ -205,7 +208,7 @@ function getServers(configs) {
 			return node;
 		}).map(node2config).filter(node => {
 			// 过滤掉数组中的无效数据
-			return node.server && node.password;
+			return node.server && node.password && node.remarks !== "暂停";
 		});
 		if (ress.length) {
 			log(`共获取到${ ress.length }个服务器`);
