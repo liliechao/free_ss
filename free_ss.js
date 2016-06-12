@@ -145,7 +145,7 @@ function runShadowsocks() {
 			}
 
 			// 新开Shadowsocks进程
-			childProcess = child_process.exec(require("path").join(__dirname, process.platform === "win32" ? "Shadowsocks.exe" : "cow"), error => reject(error));
+			childProcess = child_process.execFile(require("path").join(__dirname, process.platform === "win32" ? "Shadowsocks.exe" : "cow"), error => reject(error));
 
 			// 进程意外退出则自动重启进程
 			childProcess.on("close", () => {
