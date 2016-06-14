@@ -12,6 +12,9 @@ var hasChange;
 const configPath = require("path").join(__dirname, "gui-config.json");
 var config;
 var childProcess;
+var fs = require("fs-extra-async");
+var jsdom = require("jsdom");
+var request = require("request");
 
 // 中文所对应的配置项key名
 const keyMap = {
@@ -46,29 +49,21 @@ function upObj(objOld, objNew) {
 }
 
 function getConfig() {
-	return new Promise((resolve, reject) => {
-		require("fs").readFile(configPath, (err, data) => {
-			hasChange = false;
-			if (err) {
-				// 配置文件读取错误
-				return reject(err);
-			}
-			try {
-				data = eval.call(null, "(" + data + ")");
-			} catch (ex) {
-				// 配置文件格式错误
-				return reject(ex);
-			}
-			resolve(config = upObj(data, {
-				// 配置为自动选择服务器
-				"index": -1,
-				// 允许局域网内的计算机连接
-				"shareOverLan": true,
-				// 若未配置服务器选择算法，则将其配置为“高可用”
-				"strategy": data.strategy || strategy,
-			}));
+	return fs.readFileAsync(configPath)
+
+	.then(data => {
+		data = eval.call(null, "(" + data + ")");
+		return config = upObj(data, {
+			// 配置为自动选择服务器
+			"index": -1,
+			// 允许局域网内的计算机连接
+			"shareOverLan": true,
+			// 若未配置服务器选择算法，则将其配置为“高可用”
+			"strategy": data.strategy || strategy,
 		});
-	}).catch(() => {
+	})
+
+	.catch(() => {
 		// 配置文件读取错误，使用默认配置
 		return config || (config = defaultConfig);
 	});
@@ -104,12 +99,15 @@ function updateConfig(servers) {
 		if (hasChange) {
 			// 需要更新配置文件
 			var result = [];
-			var fs = require("fs-extra-async");
-			if (process.platform !== "win32") {
-				result.push(fs.outputFileAsync(require("path").join(require("os").homedir(), ".cow/rc"), ["listen = http://0.0.0.0:1080", "loadBalance = latency"].concat(newServers.map(server => {
-					return `proxy = ss://${ server.method || "aes-256-cfb" }:${ server.password || "" }@${ server.server }:${ server.server_port || 443 }`;
-				})).join("\n") + "\n"));
+			var rcPath;
+			if(process.platform === "win32"){
+				rcPath = require("path").join(__dirname, "rc.txt");
+			} else {
+				rcPath = require("path").join(require("os").homedir(), ".cow/rc");
 			}
+			result.push(fs.outputFileAsync(rcPath, ["listen = http://0.0.0.0:1080", "loadBalance = latency"].concat(newServers.map(server => {
+				return `proxy = ss://${ server.method || "aes-256-cfb" }:${ server.password || "" }@${ server.server }:${ server.server_port || 443 }`;
+			})).join("\n") + "\n"));
 
 			config.configs = newServers;
 			result.push(fs.outputFileAsync(configPath, JSON.stringify(config, null, "  ")));
@@ -175,7 +173,7 @@ function runShadowsocks() {
 function getDomFromUrl(url, selector) {
 	return new Promise((resolve, reject) => {
 		// 请求远程数据
-		require("jsdom").env({
+		jsdom.env({
 			url: url,
 			done: (err, window) => {
 				// 获取到DOM，查询节点返回给后续处理流程
@@ -285,7 +283,7 @@ function getProxyStatus(url) {
 			proxy: "http://127.0.0.1:" + (config.localPort || 1080),
 		};
 
-		var r = require("request").get(opt)
+		var r = request.get(opt)
 
 		.on("response", response => {
 			r.abort();
@@ -304,7 +302,7 @@ const urls = [
 	"https://www.youtube.com/",
 	"https://www.facebook.com/",
 	"https://twitter.com/",
-	"https://www.google.com/",
+	"https://plus.google.com/",
 ];
 
 function proxyTest(index) {
@@ -338,7 +336,7 @@ function getPac() {
 			timeout: 600,
 		};
 
-		var r = require("request").get(opt)
+		var r = request.get(opt)
 
 		.on("response", response => {
 			r.abort();
