@@ -4,8 +4,9 @@
 
 // 可以抓取SS账号的网页，及其CSS选择符
 const srvs = {
-	"http://freeshadowsocks.cf/": ".text-center",
-	"http://www.ishadowsocks.net/": "#free .col-lg-4.text-center",
+	"https://freessr.xyz/": ".text-center",
+	"https://a.ishadow.tech/": "#free .col-sm-4.text-center",
+	// "http://isx.yt": "#free .col-sm-4.text-center",
 };
 const strategy = "com.shadowsocks.strategy.ha";
 var hasChange;
@@ -390,7 +391,7 @@ function log(msg) {
 }
 
 process.on("uncaughtException", err => {
-	console.error(`Caught exception: ${err}`);
+	console.error("Caught exception:", err);
 });
 
 log("启动成功，正在寻找免费帐号");
