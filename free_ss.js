@@ -108,12 +108,14 @@ function updateConfig(servers) {
 			} else {
 				rcPath = require("path").join(require("os").homedir(), ".cow/rc");
 			}
-			result.push(fs.outputFileAsync(rcPath, ["listen = http://0.0.0.0:1080", "loadBalance = latency"].concat(newServers.map(server => {
+			result.push(fs.outputFile(rcPath, ["listen = http://0.0.0.0:1080", "loadBalance = latency"].concat(newServers.map(server => {
 				return `proxy = ss://${ server.method || "aes-256-cfb" }:${ server.password || "" }@${ server.server }:${ server.server_port || 443 }`;
 			})).join("\n") + "\n"));
 
 			config.configs = newServers;
-			result.push(fs.outputFileAsync(configPath, JSON.stringify(config, null, "  ")));
+			result.push(fs.outputJson(configPath, config, {
+				spaces: '\t'
+			}));
 			return Promise.all(result);
 		}
 		return false;
