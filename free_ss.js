@@ -3,19 +3,20 @@
 "use strict";
 
 // 可以抓取SS账号的网页，及其CSS选择符
+const { JSDOM } = require('jsdom');
 const srvs = {
 	"https://freessr.xyz/": ".text-center",
 	"https://a.ishadow.tech/": "#free .col-sm-4.text-center",
 	// "http://isx.yt": "#free .col-sm-4.text-center",
+	"http://ss.ishadowx.com/": "#portfolio .hover-text",
 };
 const strategy = "com.shadowsocks.strategy.ha";
-var hasChange;
+let hasChange;
 const configPath = require("path").join(__dirname, "gui-config.json");
-var config;
-var childProcess;
-var fs = require("fs-extra-async");
-var jsdom = require("jsdom");
-var request = require("request");
+let config;
+let childProcess;
+let fs = require("fs-extra");
+let request = require("request");
 
 // 中文所对应的配置项key名
 const keyMap = {
@@ -29,6 +30,8 @@ const keyMap = {
 	"端口号": "server_port",
 	"端口": "server_port",
 	"状态": "remarks",
+	"ip address": "server",
+	"port": "server_port",
 };
 
 const defaultConfig = {
@@ -40,7 +43,7 @@ const defaultConfig = {
 };
 
 function upObj(objOld, objNew) {
-	for (var key in objNew) {
+	for (let key in objNew) {
 		if (String(objOld[key]) !== String(objNew[key])) {
 			objOld[key] = objNew[key];
 			hasChange = true;
@@ -50,10 +53,9 @@ function upObj(objOld, objNew) {
 }
 
 function getConfig() {
-	return fs.readFileAsync(configPath)
+	return fs.readJson(configPath)
 
 	.then(data => {
-		data = eval.call(null, "(" + data + ")");
 		return config = upObj(data, {
 			// 配置为自动选择服务器
 			"index": -1,
@@ -78,7 +80,7 @@ function getNewConfig() {
 
 function updateConfig(servers) {
 	return getConfig().then(config => {
-		var newServers = [];
+		let newServers = [];
 		if (config.configs) {
 			servers = servers.filter(server => {
 				// 在已有配置中寻找相同的配置项，将其替换
@@ -99,8 +101,8 @@ function updateConfig(servers) {
 
 		if (hasChange) {
 			// 需要更新配置文件
-			var result = [];
-			var rcPath;
+			let result = [];
+			let rcPath;
 			if(process.platform === "win32"){
 				rcPath = require("path").join(__dirname, "rc.txt");
 			} else {
@@ -120,7 +122,7 @@ function updateConfig(servers) {
 
 function runShadowsocks() {
 	return new Promise((resolve, reject) => {
-		var resolved;
+		let resolved;
 
 		// 重新启动Shadowsocks
 		const child_process = require("child_process");
@@ -172,21 +174,12 @@ function runShadowsocks() {
 }
 
 function getDomFromUrl(url, selector) {
-	return new Promise((resolve, reject) => {
-		// 请求远程数据
-		jsdom.env({
-			url: url,
-			done: (err, window) => {
-				// 获取到DOM，查询节点返回给后续处理流程
-				if (err) {
-					reject(err);
-				} else if (selector && (typeof selector === "string")) {
-					resolve(Array.from(window.document.querySelectorAll(selector)));
-				} else {
-					resolve([window.document.documentElement]);
-				}
-			}
-		});
+	return JSDOM.fromURL(url).then(dom => {
+		if (selector && (typeof selector === "string")) {
+			return Array.from(dom.window.document.querySelectorAll(selector));
+		} else {
+			return [dom.window.document.documentElement];
+		}
 	}).catch(() => {
 		log(`${ url }\t获取服务器信息失败`);
 		return false;
@@ -194,8 +187,8 @@ function getDomFromUrl(url, selector) {
 }
 
 function getServers(configs) {
-	var reqs = [];
-	for (var url in configs) {
+	let reqs = [];
+	for (let url in configs) {
 		reqs.push(getDomFromUrl(url, configs[url]));
 	}
 	return Promise.all(reqs)
@@ -221,7 +214,7 @@ function getServers(configs) {
 
 function node2config(node) {
 	// 提取dom元素中的信息
-	var text = (node.innerText || node.textContent).trim();
+	let text = (node.innerText || node.textContent).trim();
 	if (/\n/.test(text)) {
 		// 一般的正常情况，按换行符分隔字符串即可
 		node = text.split(/\s*\n\s*/g);
@@ -235,7 +228,7 @@ function node2config(node) {
 	}
 
 	// 将提取到的信息，转为配置文件所需格式
-	var server = {
+	let server = {
 		"server": "",
 		"server_port": 0,
 		"password": "",
@@ -247,18 +240,18 @@ function node2config(node) {
 	node.forEach(inf => {
 		// 按冒号分隔字符串
 		inf = inf.split(/\s*[:：]\s*/g);
-		var key = inf[0];
-		var val = inf[1];
+		let key = inf[0].toLowerCase();
+		let val = inf[1];
 		if (key && inf.length > 1) {
 			// 根据中文提示，查字典找到配置项key名
 			key = keyMap[key] || (function() {
 				// 字典中找不到的，按字符串查找方式匹配
-				for (var keyName in keyMap) {
+				for (let keyName in keyMap) {
 					if (key.indexOf(keyName) > -1) {
 						return keyMap[keyName];
 					}
 				}
-			})();
+			})() || key;
 			// 写入数据
 			if (key && !server[key]) {
 				server[key] = key === "password" ? val : val.toLowerCase();
@@ -268,6 +261,7 @@ function node2config(node) {
 
 	// 服务器端口号转换为整数
 	server.server_port = +server.server_port || 443;
+	console.log(server)
 	server.method = server.method || "aes-256-cfb";
 
 	return server;
@@ -277,14 +271,14 @@ function node2config(node) {
 function getProxyStatus(url) {
 	return new Promise((resolve, reject) => {
 		// 配置URL
-		var opt = {
+		let opt = {
 			url: url,
 			timeout: 5000,
 			// 配置HTTP代理
 			proxy: "http://127.0.0.1:" + (config.localPort || 1080),
 		};
 
-		var r = request.get(opt)
+		let r = request.get(opt)
 
 		.on("response", response => {
 			r.abort();
@@ -309,8 +303,8 @@ const urls = [
 function proxyTest(index) {
 	// 使用代理尝试访问墙外网站
 	index = index || 0;
-	var url = urls[index];
-	var timer = new Date();
+	let url = urls[index];
+	let timer = new Date();
 	log(`尝试使用代理访问\t${ url }\t`);
 	return getProxyStatus(url).then(() => {
 		// 成功拿到墙外网站的响应，一切正常
@@ -332,12 +326,12 @@ function proxyTest(index) {
 function getPac() {
 	return new Promise((resolve, reject) => {
 		// 配置URL
-		var opt = {
+		let opt = {
 			url: "http://127.0.0.1:" + (config.localPort || 1080) + "/pac",
 			timeout: 600,
 		};
 
-		var r = request.get(opt)
+		let r = request.get(opt)
 
 		.on("response", response => {
 			r.abort();
@@ -385,7 +379,7 @@ function log(msg) {
 	function fmtd(d) {
 		return `${ d < 10 ? "0" : "" }${ d }`;
 	}
-	var time = new Date();
+	let time = new Date();
 	msg = `[${ fmtd(time.getHours()) }:${ fmtd(time.getMinutes()) }:${ fmtd(time.getSeconds()) }] ${ String(msg).replace(/\b(\w+\:\/+[^\/]+\/?)\S*/, "$1") }`;
 	console.log(msg);
 }
