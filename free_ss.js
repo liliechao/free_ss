@@ -5,10 +5,9 @@
 // 可以抓取SS账号的网页，及其CSS选择符
 const { JSDOM } = require('jsdom');
 const srvs = {
-	"https://freessr.xyz/": ".text-center",
-	"https://a.ishadow.tech/": "#free .col-sm-4.text-center",
-	// "http://isx.yt": "#free .col-sm-4.text-center",
-	"http://ss.ishadowx.com/": "#portfolio .hover-text",
+	// http://www.yaozeyuan.online/whitelist/
+	"https://freessr.win": ".text-center",
+	"https://ss.ishadowx.net": "#portfolio .hover-text",
 };
 const strategy = "com.shadowsocks.strategy.ha";
 let hasChange;
